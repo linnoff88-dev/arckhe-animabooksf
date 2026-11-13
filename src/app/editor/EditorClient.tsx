@@ -1,0 +1,90 @@
+'use client';
+
+import { useState, useEffect, useCallback, useRef } from 'react';
+import { useRouter, useSearchParams } from 'next/navigation';
+import { getStory, saveStory } from '@/lib/storageAdapter';
+import { withBase } from '@/lib/base';
+import { Story } from '@/lib/types';
+import { useGame } from '@/lib/GameContext';
+import SceneEditor from '@/components/Editor/SceneEditor';
+
+const DEFAULT_STORY: Story = {
+  title: 'Nova Historia',
+  scenes: [
+    {
+      id: 1,
+      background: 'default_bg.svg',
+      sprites: [],
+      dialogues: [],
+    },
+  ],
+};
+
+export default function EditorClient() {
+  const searchParams = useSearchParams();
+  const router = useRouter();
+  const storyId = searchParams.get('id') || 'new';
+  const { recordStoryCreated } = useGame();
+  const [story, setStory] = useState<Story | null>(null);
+  const [loading, setLoading] = useState(true);
+  const savedIdRef = useRef<string | null>(null);
+  const hasRecordedCreate = useRef(false);
+
+  useEffect(() => {
+    if (storyId === 'new') {
+      setStory(DEFAULT_STORY);
+      setLoading(false);
+      return;
+    }
+
+    // Historia salva neste aparelho ou uma das prontas do site
+    getStory(storyId)
+      .then((s) => {
+        setStory(s || DEFAULT_STORY);
+        setLoading(false);
+      })
+      .catch(() => {
+        setStory(DEFAULT_STORY);
+        setLoading(false);
+      });
+  }, [storyId]);
+
+  const handleSave = useCallback(
+    async (updatedStory: Story) => {
+      const id = storyId === 'new' ? savedIdRef.current || undefined : storyId;
+      const data = { id: await saveStory(id, updatedStory) };
+      if (data.id) {
+        if (storyId === 'new' && !hasRecordedCreate.current) {
+          hasRecordedCreate.current = true;
+          recordStoryCreated();
+        }
+        savedIdRef.current = data.id;
+      }
+      if (storyId === 'new' && data.id) {
+        router.replace(`/editor/?id=${encodeURIComponent(data.id)}`);
+      }
+      return data.id || storyId;
+    },
+    [storyId, router]
+  );
+
+  const handlePreview = useCallback(
+    async (previewStory: Story) => {
+      const savedId = await handleSave(previewStory);
+      window.open(withBase(`/reader/?id=${encodeURIComponent(savedId)}`), '_blank');
+    },
+    [handleSave]
+  );
+
+  if (loading) {
+    return (
+      <div className="w-full h-screen flex items-center justify-center bg-gray-100">
+        <div className="text-gray-400 animate-pulse">Carregando...</div>
+      </div>
+    );
+  }
+
+  if (!story) return null;
+
+  return <SceneEditor initialStory={story} onSave={handleSave} onPreview={handlePreview} />;
+}
